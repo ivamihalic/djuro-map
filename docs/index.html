@@ -1,80 +1,187 @@
 <!doctype html>
-<html>
+<html lang="hr">
 <head>
   <meta charset="utf-8" />
   <title>Đuro – kretanje (5 dana odgode)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     #map { height: 100vh; width: 100vw; }
+
     .badge {
       position: absolute; z-index: 9999; top: 12px; left: 12px;
-      background: white; padding: 10px 12px; border-radius: 10px;
+      background: white; padding: 10px 12px; border-radius: 12px;
       box-shadow: 0 2px 12px rgba(0,0,0,.15);
-      max-width: 360px;
+      max-width: 420px;
     }
-    .badge small { color: #444; }
+    .badge small { color: #444; display: block; line-height: 1.25; }
 
+    .controls {
+      margin-top: 10px;
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
     button {
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 10px;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-button:hover { background: #f6f6f6; }
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover { background: #f6f6f6; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    label {
+      display: flex; gap: 8px; align-items: center;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 6px 10px;
+      background: #fff;
+      font-size: 14px;
+    }
+    input[type="range"] { width: 160px; }
+    .tiny { font-size: 12px; color: #555; margin-top: 6px; }
   </style>
 </head>
+
 <body>
   <div class="badge">
-  <div><strong>Đuro – karta kretanja</strong></div>
-  <small>Podaci su javno prikazani s odgodom od 5 dana (radi zaštite ptice).</small>
-  <div id="status" style="margin-top:6px;"><small>Učitavanje…</small></div>
+    <div><strong>Đuro – karta kretanja</strong></div>
+    <small>Podaci su javno prikazani s odgodom od 5 dana (radi zaštite ptice).</small>
 
-  <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    <button id="playBtn">▶ Play</button>
-    <button id="pauseBtn">⏸ Pause</button>
-    <button id="resetBtn">⟲ Reset</button>
-    <label style="display:flex; gap:6px; align-items:center;">
-      <small>Speed</small>
-      <input id="speed" type="range" min="50" max="2000" value="300" />
-    </label>
+    <div id="status" class="tiny">Učitavanje…</div>
+
+    <div class="controls">
+      <button id="playBtn">▶ Play</button>
+      <button id="pauseBtn" disabled>⏸ Pause</button>
+      <button id="resetBtn" disabled>⟲ Reset</button>
+
+      <label title="Manje = brže (više skokova u sekundi)">
+        Speed
+        <input id="speed" type="range" min="50" max="2000" value="300" />
+      </label>
+    </div>
+
+    <div class="tiny">
+      Savjet: ako se promjene ne vide odmah, probajte osvježiti s <code>?v=2</code> na kraju URL-a.
+    </div>
   </div>
-</div>
 
   <div id="map"></div>
 
   <script>
+    // --- Map setup ---
     const map = L.map('map');
-    map.setView([20, 0], 2); // always show something immediately
+    map.setView([20, 0], 2); // default view so the basemap always appears
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
+    // --- Animation state ---
+    let animTimer = null;
+    let animIndex = 0;
+    let animLatLngs = [];
+    let animTimes = [];
+    let movingMarker = null;
+
+    // Layers (so we can reset/replace cleanly)
+    let pointsLayer = null;
+    let trackLine = null;
+
     function fmt(v) {
       return (v === null || v === undefined || v === "") ? "-" : String(v);
     }
 
+    function setStatus(text) {
+      document.getElementById('status').textContent = text;
+    }
+
+    function stopAnim() {
+      if (animTimer) {
+        clearInterval(animTimer);
+        animTimer = null;
+      }
+      document.getElementById('playBtn').disabled = (animLatLngs.length === 0);
+      document.getElementById('pauseBtn').disabled = true;
+    }
+
+    function stepAnim() {
+      if (!movingMarker || animLatLngs.length === 0) return;
+
+      movingMarker.setLatLng(animLatLngs[animIndex]);
+
+      const t = animTimes[animIndex] || "";
+      if (t) {
+        movingMarker.bindTooltip(t, { permanent: false, direction: "top", offset: [0, -8] }).openTooltip();
+      }
+
+      animIndex += 1;
+      if (animIndex >= animLatLngs.length) {
+        stopAnim();
+      }
+    }
+
+    function startAnim() {
+      if (animLatLngs.length === 0) return;
+
+      stopAnim();
+      const speed = Number(document.getElementById('speed')?.value || 300);
+
+      document.getElementById('playBtn').disabled = true;
+      document.getElementById('pauseBtn').disabled = false;
+
+      animTimer = setInterval(stepAnim, speed);
+    }
+
+    function resetAnim() {
+      stopAnim();
+      animIndex = 0;
+      if (movingMarker && animLatLngs.length) {
+        movingMarker.setLatLng(animLatLngs[0]);
+        const t = animTimes[0] || "";
+        if (t) movingMarker.bindTooltip(t, { permanent: false, direction: "top", offset: [0, -8] }).openTooltip();
+      }
+      document.getElementById('resetBtn').disabled = (animLatLngs.length === 0);
+      document.getElementById('playBtn').disabled = (animLatLngs.length === 0);
+      document.getElementById('pauseBtn').disabled = true;
+    }
+
     async function loadTrack() {
+      setStatus("Učitavanje GeoJSON…");
+
+      // IMPORTANT: bird.geojson must be in the same published folder as this index.html (e.g. /docs)
       const res = await fetch('./bird.geojson', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`GeoJSON fetch failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
+
       const gj = await res.json();
-
       const features = Array.isArray(gj.features) ? gj.features : [];
-      document.getElementById('status').innerHTML =
-        `<small>GeoJSON: ${res.status} • točaka: ${features.length}</small>`;
 
-      if (features.length === 0) return;
+      // Clear previous layers
+      if (pointsLayer) pointsLayer.remove();
+      if (trackLine) trackLine.remove();
+      if (movingMarker) movingMarker.remove();
+      stopAnim();
 
-      // Points layer
-      const pointsLayer = L.geoJSON(gj, {
+      setStatus(`GeoJSON učitan • točaka: ${features.length}`);
+
+      if (features.length === 0) {
+        animLatLngs = [];
+        animTimes = [];
+        document.getElementById('resetBtn').disabled = true;
+        document.getElementById('playBtn').disabled = true;
+        document.getElementById('pauseBtn').disabled = true;
+        return;
+      }
+
+      // Draw points
+      pointsLayer = L.geoJSON(gj, {
         pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 4 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
@@ -89,33 +196,64 @@ button:hover { background: #f6f6f6; }
         }
       }).addTo(map);
 
-      // Line (use GeoJSON coords directly, in the existing order)
+      // Build a line using GeoJSON coordinates in order
       const lineLatLngs = features
-        .map(f => f && f.geometry && f.geometry.type === "Point" ? f.geometry.coordinates : null)
+        .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
         .filter(c => Array.isArray(c) && c.length >= 2)
         .map(([lon, lat]) => [lat, lon]);
 
       if (lineLatLngs.length >= 2) {
-        L.polyline(lineLatLngs, { weight: 3 }).addTo(map);
+        trackLine = L.polyline(lineLatLngs, { weight: 3 }).addTo(map);
       }
 
       // Fit map to points
       const bounds = pointsLayer.getBounds();
       if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
 
-      // Show last shown timestamp
+      // Prepare animation
+      animLatLngs = lineLatLngs.slice();
+      animTimes = features
+        .map(f => (f.properties || {}).UTC_dateti || "")
+        .slice(0, animLatLngs.length);
+
+      if (animLatLngs.length > 0) {
+        movingMarker = L.circleMarker(animLatLngs[0], { radius: 7 }).addTo(map);
+        animIndex = 0;
+
+        // Show first tooltip
+        const t0 = animTimes[0] || "";
+        if (t0) movingMarker.bindTooltip(t0, { permanent: false, direction: "top", offset: [0, -8] }).openTooltip();
+
+        document.getElementById('resetBtn').disabled = false;
+        document.getElementById('playBtn').disabled = false;
+        document.getElementById('pauseBtn').disabled = true;
+      } else {
+        document.getElementById('resetBtn').disabled = true;
+        document.getElementById('playBtn').disabled = true;
+        document.getElementById('pauseBtn').disabled = true;
+      }
+
+      // Show last timestamp in status if present
       const lastProps = (features[features.length - 1] || {}).properties || {};
-      const lastTime = lastProps.UTC_dateti || "";
-      if (lastTime) {
-        document.getElementById('status').innerHTML =
-          `<small>GeoJSON: ${res.status} • točaka: ${features.length} • zadnje prikazano: ${lastTime} (UTC)</small>`;
+      if (lastProps.UTC_dateti) {
+        setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
       }
     }
 
+    // Wire up controls
+    document.getElementById('playBtn').addEventListener('click', startAnim);
+    document.getElementById('pauseBtn').addEventListener('click', stopAnim);
+    document.getElementById('resetBtn').addEventListener('click', resetAnim);
+
+    // If speed changes while playing, restart at new speed
+    document.getElementById('speed').addEventListener('input', () => {
+      if (animTimer) startAnim();
+    });
+
+    // Load
     loadTrack().catch(err => {
-      document.getElementById('status').innerHTML =
-        `<small>Greška: ${err.message}</small>`;
       console.error(err);
+      setStatus(`Greška: ${err.message}`);
     });
   </script>
 </body>

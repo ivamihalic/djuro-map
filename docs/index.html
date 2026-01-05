@@ -5,7 +5,6 @@
   <title>Đuro – kretanje (5 dana odgode)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
@@ -17,14 +16,17 @@
       position: absolute; z-index: 9999; top: 12px; left: 12px;
       background: white; padding: 10px 12px; border-radius: 12px;
       box-shadow: 0 2px 12px rgba(0,0,0,.15);
-      max-width: 460px;
+      max-width: 520px;
     }
     .badge small { color: #444; display: block; line-height: 1.25; }
+    .tiny { font-size: 12px; color: #555; margin-top: 6px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
     .controls {
       margin-top: 10px;
       display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
     }
+
     button {
       border: 1px solid #ddd;
       background: #fff;
@@ -48,9 +50,7 @@
       flex-wrap: wrap;
     }
 
-    input[type="range"] { width: 220px; }
-    .tiny { font-size: 12px; color: #555; margin-top: 6px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    input[type="range"] { width: 240px; }
   </style>
 </head>
 
@@ -66,39 +66,74 @@
       <button id="pauseBtn" disabled>⏸ Pause</button>
       <button id="resetBtn" disabled>⟲ Reset</button>
 
-      <!-- Speed: right = faster -->
-      <div class="panel" title="Desno = brže">
+      <div class="panel" title="Lijevo = sporije, desno = brže">
         <span>Speed</span>
-        <input id="speed" type="range" min="1" max="100" value="40" />
-        <span class="tiny">brže →</span>
+        <!-- interval in ms: left(slow)=1500ms right(fast)=80ms -->
+        <input id="speed" type="range" min="80" max="1500" value="650" step="10" />
+        <span class="tiny">ms/korak</span>
       </div>
     </div>
 
-    <!-- Timeline -->
     <div class="panel" style="margin-top:10px;">
       <span>Timeline</span>
       <input id="timeline" type="range" min="0" max="0" value="0" step="1" disabled />
       <span id="timelineLabel" class="tiny mono">—</span>
-    </div>
-
-    <div class="tiny">
-      Ako se promjene ne vide odmah: osvježite s <span class="mono">?v=2</span> na kraju URL-a.
     </div>
   </div>
 
   <div id="map"></div>
 
   <script>
-    // --- Map setup ---
-    const map = L.map('map');
-    map.setView([20, 0], 2); // basemap always visible
+    // ====== STYLE YOU CAN EDIT ======
+    const TRACK_COLOR = "#2563eb";   // blue line
+    const TRACK_WEIGHT = 4;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const POINT_STROKE = "#0f172a";  // dark outline
+    const POINT_FILL = "#22c55e";    // green points
+    const POINT_RADIUS = 4;
+
+    const MOVING_OUTLINE = "#ffffff";
+    const MOVING_FILL = "#ff0000";   // red moving dot
+    const MOVING_RADIUS = 9;
+    // ===============================
+
+    // Map
+    const map = L.map('map');
+    map.setView([20, 0], 2);
+
+    // Basemaps
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    });
 
-    // --- State ---
+    // Esri satellite (note: subject to Esri terms; fine for many outreach uses)
+    const esriSat = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri'
+    });
+
+    // OpenTopoMap (note: subject to OpenTopoMap terms and usage limits)
+    const openTopo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      maxZoom: 17,
+      attribution: '&copy; OpenTopoMap (CC-BY-SA)'
+    });
+
+    osm.addTo(map);
+
+    // Layer control (top-right)
+    L.control.layers(
+      {
+        "OpenStreetMap": osm,
+        "Satellite (Esri)": esriSat,
+        "Topo (OpenTopoMap)": openTopo
+      },
+      {},
+      { collapsed: true }
+    ).addTo(map);
+
+    // State
     let animTimer = null;
     let animIndex = 0;
     let animLatLngs = [];
@@ -108,6 +143,7 @@
     let pointsLayer = null;
     let trackLine = null;
 
+    // UI
     const statusEl = document.getElementById('status');
     const playBtn = document.getElementById('playBtn');
     const pauseBtn = document.getElementById('pauseBtn');
@@ -116,29 +152,17 @@
     const timelineEl = document.getElementById('timeline');
     const timelineLabelEl = document.getElementById('timelineLabel');
 
-    function fmt(v) {
-      return (v === null || v === undefined || v === "") ? "-" : String(v);
-    }
-    function setStatus(text) { statusEl.textContent = text; }
-
-    // Right side should be faster:
-    // slider 1..100 -> interval ms  (100 => ~20ms, 1 => 2000ms)
-    function currentIntervalMs() {
-      const v = Number(speedEl.value || 40);
-      const ms = Math.round(2000 / v);
-      return Math.max(20, Math.min(2000, ms));
-    }
+    function setStatus(t) { statusEl.textContent = t; }
+    function fmt(v) { return (v === null || v === undefined || v === "") ? "-" : String(v); }
+    function intervalMs() { return Number(speedEl.value || 650); }
 
     function stopAnim() {
-      if (animTimer) {
-        clearInterval(animTimer);
-        animTimer = null;
-      }
+      if (animTimer) { clearInterval(animTimer); animTimer = null; }
       playBtn.disabled = (animLatLngs.length === 0);
       pauseBtn.disabled = true;
     }
 
-    function setIndex(i, { pan = false } = {}) {
+    function setIndex(i, { pan=false } = {}) {
       if (!movingMarker || animLatLngs.length === 0) return;
 
       animIndex = Math.max(0, Math.min(animLatLngs.length - 1, i));
@@ -147,39 +171,31 @@
 
       const t = animTimes[animIndex] || "";
       timelineEl.value = String(animIndex);
-      timelineLabelEl.textContent = t ? t + " (UTC)" : "—";
+      timelineLabelEl.textContent = t ? (t + " (UTC)") : "—";
 
       if (t) {
         movingMarker.bindTooltip(t, { permanent: false, direction: "top", offset: [0, -10] }).openTooltip();
       }
-
       if (pan) map.panTo(latlng, { animate: true });
     }
 
     function stepAnim() {
       if (!movingMarker || animLatLngs.length === 0) return;
-
-      setIndex(animIndex + 1, { pan: false });
-
-      if (animIndex >= animLatLngs.length - 1) {
-        stopAnim();
-      }
+      if (animIndex >= animLatLngs.length - 1) { stopAnim(); return; }
+      setIndex(animIndex + 1);
     }
 
     function startAnim() {
       if (animLatLngs.length === 0) return;
-
       stopAnim();
-
       playBtn.disabled = true;
       pauseBtn.disabled = false;
-
-      animTimer = setInterval(stepAnim, currentIntervalMs());
+      animTimer = setInterval(stepAnim, intervalMs());
     }
 
     function resetAnim() {
       stopAnim();
-      setIndex(0, { pan: true });
+      setIndex(0, { pan:true });
       resetBtn.disabled = (animLatLngs.length === 0);
       playBtn.disabled = (animLatLngs.length === 0);
       pauseBtn.disabled = true;
@@ -187,15 +203,13 @@
 
     async function loadTrack() {
       setStatus("Učitavanje GeoJSON…");
-
-      // bird.geojson must be in the same published folder as this index.html
       const res = await fetch('./bird.geojson', { cache: 'no-store' });
       if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
 
       const gj = await res.json();
       const features = Array.isArray(gj.features) ? gj.features : [];
 
-      // Clear previous layers/state
+      // Clear
       if (pointsLayer) pointsLayer.remove();
       if (trackLine) trackLine.remove();
       if (movingMarker) movingMarker.remove();
@@ -207,18 +221,22 @@
         animLatLngs = [];
         animTimes = [];
         timelineEl.disabled = true;
-        timelineEl.max = "0";
-        timelineEl.value = "0";
-        timelineLabelEl.textContent = "—";
         resetBtn.disabled = true;
         playBtn.disabled = true;
         pauseBtn.disabled = true;
+        timelineLabelEl.textContent = "—";
         return;
       }
 
-      // Draw points
+      // Points (colored)
       pointsLayer = L.geoJSON(gj, {
-        pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 4 }),
+        pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+          radius: POINT_RADIUS,
+          color: POINT_STROKE,
+          weight: 1,
+          fillColor: POINT_FILL,
+          fillOpacity: 0.9
+        }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           const html = `
@@ -232,80 +250,69 @@
         }
       }).addTo(map);
 
-      // Track line
+      // Line (colored)
       const lineLatLngs = features
         .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
         .filter(c => Array.isArray(c) && c.length >= 2)
         .map(([lon, lat]) => [lat, lon]);
 
       if (lineLatLngs.length >= 2) {
-        trackLine = L.polyline(lineLatLngs, { weight: 3 }).addTo(map);
+        trackLine = L.polyline(lineLatLngs, {
+          color: TRACK_COLOR,
+          weight: TRACK_WEIGHT,
+          opacity: 0.9
+        }).addTo(map);
       }
 
       // Fit
       const bounds = pointsLayer.getBounds();
       if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
 
-      // Prepare animation arrays
+      // Animation arrays
       animLatLngs = lineLatLngs.slice();
-      animTimes = features
-        .map(f => (f.properties || {}).UTC_dateti || "")
-        .slice(0, animLatLngs.length);
+      animTimes = features.map(f => (f.properties || {}).UTC_dateti || "").slice(0, animLatLngs.length);
 
-      // Moving marker (different color)
+      // Moving marker (colored)
       if (animLatLngs.length > 0) {
         movingMarker = L.circleMarker(animLatLngs[0], {
-          radius: 8,
-          color: "#e11d48",     // stroke
-          fillColor: "#e11d48", // fill
+          radius: MOVING_RADIUS,
+          color: MOVING_OUTLINE,
+          weight: 3,
+          fillColor: MOVING_FILL,
           fillOpacity: 1
         }).addTo(map);
 
-        // Timeline setup
         timelineEl.disabled = false;
         timelineEl.min = "0";
         timelineEl.max = String(animLatLngs.length - 1);
         timelineEl.step = "1";
 
-        // Initialize at first point
-        setIndex(0, { pan: false });
+        setIndex(0);
 
         resetBtn.disabled = false;
         playBtn.disabled = false;
         pauseBtn.disabled = true;
 
-        // last timestamp in status
         const lastProps = (features[features.length - 1] || {}).properties || {};
         if (lastProps.UTC_dateti) {
           setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
         }
-      } else {
-        timelineEl.disabled = true;
-        resetBtn.disabled = true;
-        playBtn.disabled = true;
-        pauseBtn.disabled = true;
       }
     }
 
-    // Controls wiring
     playBtn.addEventListener('click', startAnim);
     pauseBtn.addEventListener('click', stopAnim);
     resetBtn.addEventListener('click', resetAnim);
 
-    // If speed changes while playing, restart at new speed
     speedEl.addEventListener('input', () => {
       if (animTimer) startAnim();
     });
 
-    // Timeline: jump to selected time (also pauses playback)
     timelineEl.addEventListener('input', () => {
       stopAnim();
-      setIndex(Number(timelineEl.value), { pan: true });
-      playBtn.disabled = (animLatLngs.length === 0);
-      pauseBtn.disabled = true;
+      setIndex(Number(timelineEl.value), { pan:true });
     });
 
-    // Load
     loadTrack().catch(err => {
       console.error(err);
       setStatus(`Greška: ${err.message}`);

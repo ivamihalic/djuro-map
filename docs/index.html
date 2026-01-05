@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Bird movement (5-day delayed)</title>
+  <title>Đuro – kretanje (5 dana odgode)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
@@ -15,60 +15,85 @@
       position: absolute; z-index: 9999; top: 12px; left: 12px;
       background: white; padding: 10px 12px; border-radius: 10px;
       box-shadow: 0 2px 12px rgba(0,0,0,.15);
-      max-width: 320px;
+      max-width: 360px;
     }
     .badge small { color: #444; }
   </style>
 </head>
 <body>
   <div class="badge">
-    <div><strong>Bird movement map</strong></div>
-    <small>Public track is delayed by 5 days for safety.</small>
-    <div id="status" style="margin-top:6px;"><small>Loading…</small></div>
+    <div><strong>Đuro – karta kretanja</strong></div>
+    <small>Podaci su javno prikazani s odgodom od 5 dana (radi zaštite ptice).</small>
+    <div id="status" style="margin-top:6px;"><small>Učitavanje…</small></div>
   </div>
   <div id="map"></div>
 
   <script>
     const map = L.map('map');
+    map.setView([20, 0], 2); // always show something immediately
+
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
+    function fmt(v) {
+      return (v === null || v === undefined || v === "") ? "-" : String(v);
+    }
+
     async function loadTrack() {
       const res = await fetch('./bird.geojson', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`GeoJSON fetch failed: ${res.status}`);
       const gj = await res.json();
 
-      let pointsLayer = null;
-      let lineCoords = [];
+      const features = Array.isArray(gj.features) ? gj.features : [];
+      document.getElementById('status').innerHTML =
+        `<small>GeoJSON: ${res.status} • točaka: ${features.length}</small>`;
 
-      pointsLayer = L.geoJSON(gj, {
-        pointToLayer: (feature, latlng) => {
-          const t = feature.properties?.timestamp || '';
-          return L.circleMarker(latlng, { radius: 4 });
-        },
+      if (features.length === 0) return;
+
+      // Points layer
+      const pointsLayer = L.geoJSON(gj, {
+        pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 4 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
-          const html = `<strong>${p.name || 'Bird'}</strong><br/>${p.timestamp || ''}`;
+          const html = `
+            <strong>Uređaj:</strong> ${fmt(p.device_id)}<br/>
+            <strong>Vrijeme (UTC):</strong> ${fmt(p.UTC_dateti)}<br/>
+            <strong>Brzina (km/h):</strong> ${fmt(p.speed_km_h)}<br/>
+            <strong>Visina (m):</strong> ${fmt(p.Altitude_m)}<br/>
+            <strong>Temp:</strong> ${fmt(p.temperatur)}
+          `;
           layer.bindPopup(html);
-          lineCoords.push(layer.getLatLng());
         }
       }).addTo(map);
 
-      // Draw a line through the points in their order
-      const poly = L.polyline(lineCoords, { weight: 3 }).addTo(map);
+      // Line (use GeoJSON coords directly, in the existing order)
+      const lineLatLngs = features
+        .map(f => f && f.geometry && f.geometry.type === "Point" ? f.geometry.coordinates : null)
+        .filter(c => Array.isArray(c) && c.length >= 2)
+        .map(([lon, lat]) => [lat, lon]);
 
+      if (lineLatLngs.length >= 2) {
+        L.polyline(lineLatLngs, { weight: 3 }).addTo(map);
+      }
+
+      // Fit map to points
       const bounds = pointsLayer.getBounds();
       if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
 
-      // Update status
-      const last = gj.features?.[gj.features.length - 1]?.properties?.timestamp;
-      document.getElementById('status').innerHTML =
-        `<small>Points shown: ${gj.features.length}${last ? ` • last shown: ${last}` : ''}</small>`;
+      // Show last shown timestamp
+      const lastProps = (features[features.length - 1] || {}).properties || {};
+      const lastTime = lastProps.UTC_dateti || "";
+      if (lastTime) {
+        document.getElementById('status').innerHTML =
+          `<small>GeoJSON: ${res.status} • točaka: ${features.length} • zadnje prikazano: ${lastTime} (UTC)</small>`;
+      }
     }
 
     loadTrack().catch(err => {
-      document.getElementById('status').innerHTML = `<small>Error loading track.</small>`;
+      document.getElementById('status').innerHTML =
+        `<small>Greška: ${err.message}</small>`;
       console.error(err);
     });
   </script>

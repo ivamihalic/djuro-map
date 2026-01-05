@@ -18,14 +18,35 @@
       max-width: 360px;
     }
     .badge small { color: #444; }
+
+    button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+button:hover { background: #f6f6f6; }
+
   </style>
 </head>
 <body>
   <div class="badge">
-    <div><strong>Đuro – karta kretanja</strong></div>
-    <small>Podaci su javno prikazani s odgodom od 5 dana (radi zaštite ptice).</small>
-    <div id="status" style="margin-top:6px;"><small>Učitavanje…</small></div>
+  <div><strong>Đuro – karta kretanja</strong></div>
+  <small>Podaci su javno prikazani s odgodom od 5 dana (radi zaštite ptice).</small>
+  <div id="status" style="margin-top:6px;"><small>Učitavanje…</small></div>
+
+  <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <button id="playBtn">▶ Play</button>
+    <button id="pauseBtn">⏸ Pause</button>
+    <button id="resetBtn">⟲ Reset</button>
+    <label style="display:flex; gap:6px; align-items:center;">
+      <small>Speed</small>
+      <input id="speed" type="range" min="50" max="2000" value="300" />
+    </label>
   </div>
+</div>
+
   <div id="map"></div>
 
   <script>

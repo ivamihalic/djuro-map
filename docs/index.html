@@ -17,7 +17,7 @@
       position: absolute; z-index: 9999; top: 12px; left: 12px;
       background: white; padding: 10px 12px; border-radius: 12px;
       box-shadow: 0 2px 12px rgba(0,0,0,.15);
-      max-width: 420px;
+      max-width: 460px;
     }
     .badge small { color: #444; display: block; line-height: 1.25; }
 
@@ -36,16 +36,21 @@
     button:hover { background: #f6f6f6; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    label {
-      display: flex; gap: 8px; align-items: center;
+    .panel {
       border: 1px solid #ddd;
       border-radius: 10px;
       padding: 6px 10px;
       background: #fff;
       font-size: 14px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
     }
-    input[type="range"] { width: 160px; }
+
+    input[type="range"] { width: 220px; }
     .tiny { font-size: 12px; color: #555; margin-top: 6px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
 </head>
 
@@ -61,14 +66,23 @@
       <button id="pauseBtn" disabled>⏸ Pause</button>
       <button id="resetBtn" disabled>⟲ Reset</button>
 
-      <label title="Manje = brže (više skokova u sekundi)">
-        Speed
-        <input id="speed" type="range" min="50" max="2000" value="300" />
-      </label>
+      <!-- Speed: right = faster -->
+      <div class="panel" title="Desno = brže">
+        <span>Speed</span>
+        <input id="speed" type="range" min="1" max="100" value="40" />
+        <span class="tiny">brže →</span>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="panel" style="margin-top:10px;">
+      <span>Timeline</span>
+      <input id="timeline" type="range" min="0" max="0" value="0" step="1" disabled />
+      <span id="timelineLabel" class="tiny mono">—</span>
     </div>
 
     <div class="tiny">
-      Savjet: ako se promjene ne vide odmah, probajte osvježiti s <code>?v=2</code> na kraju URL-a.
+      Ako se promjene ne vide odmah: osvježite s <span class="mono">?v=2</span> na kraju URL-a.
     </div>
   </div>
 
@@ -77,30 +91,42 @@
   <script>
     // --- Map setup ---
     const map = L.map('map');
-    map.setView([20, 0], 2); // default view so the basemap always appears
+    map.setView([20, 0], 2); // basemap always visible
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // --- Animation state ---
+    // --- State ---
     let animTimer = null;
     let animIndex = 0;
     let animLatLngs = [];
     let animTimes = [];
     let movingMarker = null;
 
-    // Layers (so we can reset/replace cleanly)
     let pointsLayer = null;
     let trackLine = null;
+
+    const statusEl = document.getElementById('status');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const speedEl = document.getElementById('speed');
+    const timelineEl = document.getElementById('timeline');
+    const timelineLabelEl = document.getElementById('timelineLabel');
 
     function fmt(v) {
       return (v === null || v === undefined || v === "") ? "-" : String(v);
     }
+    function setStatus(text) { statusEl.textContent = text; }
 
-    function setStatus(text) {
-      document.getElementById('status').textContent = text;
+    // Right side should be faster:
+    // slider 1..100 -> interval ms  (100 => ~20ms, 1 => 2000ms)
+    function currentIntervalMs() {
+      const v = Number(speedEl.value || 40);
+      const ms = Math.round(2000 / v);
+      return Math.max(20, Math.min(2000, ms));
     }
 
     function stopAnim() {
@@ -108,22 +134,34 @@
         clearInterval(animTimer);
         animTimer = null;
       }
-      document.getElementById('playBtn').disabled = (animLatLngs.length === 0);
-      document.getElementById('pauseBtn').disabled = true;
+      playBtn.disabled = (animLatLngs.length === 0);
+      pauseBtn.disabled = true;
+    }
+
+    function setIndex(i, { pan = false } = {}) {
+      if (!movingMarker || animLatLngs.length === 0) return;
+
+      animIndex = Math.max(0, Math.min(animLatLngs.length - 1, i));
+      const latlng = animLatLngs[animIndex];
+      movingMarker.setLatLng(latlng);
+
+      const t = animTimes[animIndex] || "";
+      timelineEl.value = String(animIndex);
+      timelineLabelEl.textContent = t ? t + " (UTC)" : "—";
+
+      if (t) {
+        movingMarker.bindTooltip(t, { permanent: false, direction: "top", offset: [0, -10] }).openTooltip();
+      }
+
+      if (pan) map.panTo(latlng, { animate: true });
     }
 
     function stepAnim() {
       if (!movingMarker || animLatLngs.length === 0) return;
 
-      movingMarker.setLatLng(animLatLngs[animIndex]);
+      setIndex(animIndex + 1, { pan: false });
 
-      const t = animTimes[animIndex] || "";
-      if (t) {
-        movingMarker.bindTooltip(t, { permanent: false, direction: "top", offset: [0, -8] }).openTooltip();
-      }
-
-      animIndex += 1;
-      if (animIndex >= animLatLngs.length) {
+      if (animIndex >= animLatLngs.length - 1) {
         stopAnim();
       }
     }
@@ -132,38 +170,32 @@
       if (animLatLngs.length === 0) return;
 
       stopAnim();
-      const speed = Number(document.getElementById('speed')?.value || 300);
 
-      document.getElementById('playBtn').disabled = true;
-      document.getElementById('pauseBtn').disabled = false;
+      playBtn.disabled = true;
+      pauseBtn.disabled = false;
 
-      animTimer = setInterval(stepAnim, speed);
+      animTimer = setInterval(stepAnim, currentIntervalMs());
     }
 
     function resetAnim() {
       stopAnim();
-      animIndex = 0;
-      if (movingMarker && animLatLngs.length) {
-        movingMarker.setLatLng(animLatLngs[0]);
-        const t = animTimes[0] || "";
-        if (t) movingMarker.bindTooltip(t, { permanent: false, direction: "top", offset: [0, -8] }).openTooltip();
-      }
-      document.getElementById('resetBtn').disabled = (animLatLngs.length === 0);
-      document.getElementById('playBtn').disabled = (animLatLngs.length === 0);
-      document.getElementById('pauseBtn').disabled = true;
+      setIndex(0, { pan: true });
+      resetBtn.disabled = (animLatLngs.length === 0);
+      playBtn.disabled = (animLatLngs.length === 0);
+      pauseBtn.disabled = true;
     }
 
     async function loadTrack() {
       setStatus("Učitavanje GeoJSON…");
 
-      // IMPORTANT: bird.geojson must be in the same published folder as this index.html (e.g. /docs)
+      // bird.geojson must be in the same published folder as this index.html
       const res = await fetch('./bird.geojson', { cache: 'no-store' });
       if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
 
       const gj = await res.json();
       const features = Array.isArray(gj.features) ? gj.features : [];
 
-      // Clear previous layers
+      // Clear previous layers/state
       if (pointsLayer) pointsLayer.remove();
       if (trackLine) trackLine.remove();
       if (movingMarker) movingMarker.remove();
@@ -174,9 +206,13 @@
       if (features.length === 0) {
         animLatLngs = [];
         animTimes = [];
-        document.getElementById('resetBtn').disabled = true;
-        document.getElementById('playBtn').disabled = true;
-        document.getElementById('pauseBtn').disabled = true;
+        timelineEl.disabled = true;
+        timelineEl.max = "0";
+        timelineEl.value = "0";
+        timelineLabelEl.textContent = "—";
+        resetBtn.disabled = true;
+        playBtn.disabled = true;
+        pauseBtn.disabled = true;
         return;
       }
 
@@ -196,7 +232,7 @@
         }
       }).addTo(map);
 
-      // Build a line using GeoJSON coordinates in order
+      // Track line
       const lineLatLngs = features
         .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
         .filter(c => Array.isArray(c) && c.length >= 2)
@@ -206,48 +242,67 @@
         trackLine = L.polyline(lineLatLngs, { weight: 3 }).addTo(map);
       }
 
-      // Fit map to points
+      // Fit
       const bounds = pointsLayer.getBounds();
       if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
 
-      // Prepare animation
+      // Prepare animation arrays
       animLatLngs = lineLatLngs.slice();
       animTimes = features
         .map(f => (f.properties || {}).UTC_dateti || "")
         .slice(0, animLatLngs.length);
 
+      // Moving marker (different color)
       if (animLatLngs.length > 0) {
-        movingMarker = L.circleMarker(animLatLngs[0], { radius: 7 }).addTo(map);
-        animIndex = 0;
+        movingMarker = L.circleMarker(animLatLngs[0], {
+          radius: 8,
+          color: "#e11d48",     // stroke
+          fillColor: "#e11d48", // fill
+          fillOpacity: 1
+        }).addTo(map);
 
-        // Show first tooltip
-        const t0 = animTimes[0] || "";
-        if (t0) movingMarker.bindTooltip(t0, { permanent: false, direction: "top", offset: [0, -8] }).openTooltip();
+        // Timeline setup
+        timelineEl.disabled = false;
+        timelineEl.min = "0";
+        timelineEl.max = String(animLatLngs.length - 1);
+        timelineEl.step = "1";
 
-        document.getElementById('resetBtn').disabled = false;
-        document.getElementById('playBtn').disabled = false;
-        document.getElementById('pauseBtn').disabled = true;
+        // Initialize at first point
+        setIndex(0, { pan: false });
+
+        resetBtn.disabled = false;
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+
+        // last timestamp in status
+        const lastProps = (features[features.length - 1] || {}).properties || {};
+        if (lastProps.UTC_dateti) {
+          setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
+        }
       } else {
-        document.getElementById('resetBtn').disabled = true;
-        document.getElementById('playBtn').disabled = true;
-        document.getElementById('pauseBtn').disabled = true;
-      }
-
-      // Show last timestamp in status if present
-      const lastProps = (features[features.length - 1] || {}).properties || {};
-      if (lastProps.UTC_dateti) {
-        setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
+        timelineEl.disabled = true;
+        resetBtn.disabled = true;
+        playBtn.disabled = true;
+        pauseBtn.disabled = true;
       }
     }
 
-    // Wire up controls
-    document.getElementById('playBtn').addEventListener('click', startAnim);
-    document.getElementById('pauseBtn').addEventListener('click', stopAnim);
-    document.getElementById('resetBtn').addEventListener('click', resetAnim);
+    // Controls wiring
+    playBtn.addEventListener('click', startAnim);
+    pauseBtn.addEventListener('click', stopAnim);
+    resetBtn.addEventListener('click', resetAnim);
 
     // If speed changes while playing, restart at new speed
-    document.getElementById('speed').addEventListener('input', () => {
+    speedEl.addEventListener('input', () => {
       if (animTimer) startAnim();
+    });
+
+    // Timeline: jump to selected time (also pauses playback)
+    timelineEl.addEventListener('input', () => {
+      stopAnim();
+      setIndex(Number(timelineEl.value), { pan: true });
+      playBtn.disabled = (animLatLngs.length === 0);
+      pauseBtn.disabled = true;
     });
 
     // Load

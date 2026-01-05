@@ -52,6 +52,7 @@
 
     input[type="range"] { width: 260px; }
 
+    /*
     /* Simple gradient legend bar */
     .legendBar {
       width: 160px;
@@ -60,13 +61,14 @@
       border: 1px solid #ddd;
       background: linear-gradient(90deg, #e5e7eb, #111827);
     }
+    */
   </style>
 </head>
 
 <body>
   <div class="badge">
     <div><strong>Kuda se kreće Đuro?</strong></div>
-    <small>Podaci su javno prikazani s odgodom od 5 dana (radi zaštite ptice).</small>
+    <small>Podaci prikazani s odgodom.</small>
     <p>Karta prikazuje kretanje Đure, mladog orla zmijara sa Telašćice, tijekom svoje prve selidbe.</p>
 
     <div id="status" class="tiny">Učitavanje…</div>
@@ -90,6 +92,11 @@
       <span id="timelineLabel" class="tiny mono">—</span>
     </div>
 
+    <div class="tiny">
+      Ako se promjene ne vide odmah: osvježite s <span class="mono">?v=2</span> na kraju URL-a.
+    </div>
+
+    /*
     <div class="panel" style="margin-top:10px;">
       <span>Track (time)</span>
       <div class="legendBar" aria-label="Light to dark time gradient"></div>
@@ -97,12 +104,16 @@
       <span class="tiny">→</span>
       <span class="tiny mono" id="tEnd">—</span>
     </div>
+    */
   </div>
 
   <div id="map"></div>
 
   <script>
     // ====== STYLE YOU CAN EDIT ======
+    const TRACK_COLOR = "#2563eb";   // blue line
+    const TRACK_WEIGHT = 4;
+    
     const POINT_STROKE = "#0f172a";
     const POINT_FILL = "#22c55e";
     const POINT_RADIUS = 4;
@@ -113,10 +124,12 @@
     const MOVING_RADIUS = 9;
 
     // Gradient endpoints (light -> dark)
+    /*
     const GRADIENT_LIGHT = "#e5e7eb"; // light gray
     const GRADIENT_DARK  = "#111827"; // near-black
     const GRADIENT_WEIGHT = 4;
     const GRADIENT_OPACITY = 0.9;
+    */
     // ===============================
 
     // Map
@@ -140,7 +153,7 @@
       attribution: '&copy; OpenTopoMap (CC-BY-SA)'
     });
 
-    osm.addTo(map);
+    esriSat.addTo(map);
     L.control.layers(
       { "OpenStreetMap": osm, "Satellite (Esri)": esriSat, "Topo (OpenTopoMap)": openTopo },
       {},
@@ -172,6 +185,7 @@
     function fmt(v) { return (v === null || v === undefined || v === "") ? "-" : String(v); }
     function intervalMs() { return Number(speedEl.value || 650); }
 
+    /*
     // Convert hex (#rrggbb) to rgb
     function hexToRgb(hex) {
       const h = hex.replace('#', '').trim();
@@ -187,6 +201,7 @@
       const b2 = Math.round(a.b + (b.b - a.b) * t);
       return `rgb(${r},${g},${b2})`;
     }
+    */
 
     function stopAnim() {
       if (animTimer) { clearInterval(animTimer); animTimer = null; }
@@ -233,6 +248,7 @@
       pauseBtn.disabled = true;
     }
 
+    /*
     function buildGradientLine(latlngs) {
       // Draw each segment with a progressively darker color
       const segCount = Math.max(0, latlngs.length - 1);
@@ -254,7 +270,8 @@
 
       return L.layerGroup(layers);
     }
-
+    */
+    
     async function loadTrack() {
       setStatus("Učitavanje GeoJSON…");
       const res = await fetch('./bird.geojson', { cache: 'no-store' });
@@ -265,8 +282,9 @@
 
       // Clear
       if (pointsLayer) pointsLayer.remove();
-      if (gradientGroup) gradientGroup.remove();
+      if (trackLine) trackLine.remove();
       if (movingMarker) movingMarker.remove();
+      //if (gradientGroup) gradientGroup.remove();
       stopAnim();
 
       setStatus(`GeoJSON učitan • točaka: ${features.length}`);
@@ -296,11 +314,13 @@
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           const html = `
-            <strong>Uređaj:</strong> ${fmt(p.device_id)}<br/>
             <strong>Vrijeme (UTC):</strong> ${fmt(p.UTC_dateti)}<br/>
+             /*
+            <strong>Uređaj:</strong> ${fmt(p.device_id)}<br/>
             <strong>Brzina (km/h):</strong> ${fmt(p.speed_km_h)}<br/>
             <strong>Visina (m):</strong> ${fmt(p.Altitude_m)}<br/>
             <strong>Temp:</strong> ${fmt(p.temperatur)}
+            */
           `;
           layer.bindPopup(html);
         }
@@ -313,8 +333,18 @@
         .map(([lon, lat]) => [lat, lon]);
 
       // Gradient track
+      /*
       if (latlngs.length >= 2) {
         gradientGroup = buildGradientLine(latlngs).addTo(map);
+      }
+      */
+
+      if (lineLatLngs.length >= 2) {
+        trackLine = L.polyline(lineLatLngs, {
+          color: TRACK_COLOR,
+          weight: TRACK_WEIGHT,
+          opacity: 0.9
+        }).addTo(map);
       }
 
       // Fit
@@ -326,9 +356,11 @@
       animTimes = features.map(f => (f.properties || {}).UTC_dateti || "").slice(0, animLatLngs.length);
 
       // Update legend endpoints
+      /*
       tStartEl.textContent = (animTimes[0] || "—") + (animTimes[0] ? " (UTC)" : "");
       tEndEl.textContent = (animTimes[animTimes.length - 1] || "—") + (animTimes[animTimes.length - 1] ? " (UTC)" : "");
-
+      */
+      
       // Moving marker
       if (animLatLngs.length > 0) {
         movingMarker = L.circleMarker(animLatLngs[0], {

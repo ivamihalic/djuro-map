@@ -60,6 +60,8 @@
     <small>Podaci prikazani s odgodom.</small>
     <p style="margin: 8px 0 0 0;">
       Karta prikazuje kretanje Đure, mladog orla zmijara sa Telašćice, tijekom svoje prve selidbe.
+
+      Radi sigurnosti, stvarna lokacija gnijezda nije prikazana nego područje gniježđenja kao ni trenutna Đurina lokacija.
     </p>
 
     <div id="status" class="tiny">Učitavanje…</div>
@@ -226,7 +228,7 @@
         onEachFeature: (feature, layer) => {
           const name =
             (feature.properties && (feature.properties.name || feature.properties.NAME || feature.properties.Naziv)) ||
-            "Područje";
+            "Gnjezdilište";
           layer.bindPopup(name);
         },
         pane: "overlayPane"

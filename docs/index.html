@@ -71,7 +71,6 @@
 
       <div class="panel" title="Lijevo = sporije, desno = brže">
         <span>Brzina</span>
-        <!-- interval in ms: left(slow)=1500ms right(fast)=80ms -->
         <input id="speed" type="range" min="80" max="1500" value="650" step="10" />
         <span class="tiny">ms/korak</span>
       </div>
@@ -84,22 +83,27 @@
     </div>
 
     <div class="tiny">
-      Ako se promjene ne vide odmah: osvježite s <span class="mono">?v=2</span> na kraju URL-a.
+      Ako se promjene ne vide odmah: osvježite s <span class="mono">?v=999</span> na kraju URL-a.
     </div>
   </div>
 
   <div id="map"></div>
 
   <script>
+    // Show JS errors in the status box too (huge help)
+    window.onerror = function (msg, src, line, col) {
+      const el = document.getElementById('status');
+      if (el) el.textContent = `JS greška: ${msg} (linija ${line})`;
+    };
+
     // ====== STYLE YOU CAN EDIT ======
-    const TRACK_COLOR = "#2563eb";   // blue line
+    const TRACK_COLOR = "#2563eb";
     const TRACK_WEIGHT = 4;
 
     const POINT_STROKE = "#0f172a";
     const POINT_FILL = "#22c55e";
     const POINT_RADIUS = 4;
 
-    // Moving dot
     const MOVING_OUTLINE = "#ffffff";
     const MOVING_FILL = "#ff0000";
     const MOVING_RADIUS = 9;
@@ -144,6 +148,7 @@
 
     let pointsLayer = null;
     let trackLine = null;
+    let areaLayer = null;
 
     // UI
     const statusEl = document.getElementById('status');
@@ -164,7 +169,8 @@
       pauseBtn.disabled = true;
     }
 
-    function setIndex(i, { pan=false } = {}) {
+    function setIndex(i, opts) {
+      const pan = opts && opts.pan;
       if (!movingMarker || animLatLngs.length === 0) return;
 
       animIndex = Math.max(0, Math.min(animLatLngs.length - 1, i));
@@ -197,143 +203,147 @@
 
     function resetAnim() {
       stopAnim();
-      setIndex(0, { pan:true });
+      setIndex(0, { pan: true });
       resetBtn.disabled = (animLatLngs.length === 0);
       playBtn.disabled = (animLatLngs.length === 0);
       pauseBtn.disabled = true;
     }
 
-    let areaLayer = null;
+    async function loadArea() {
+      const res = await fetch('./area.geojson', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Ne mogu učitati area.geojson (HTTP ${res.status})`);
+      const gj = await res.json();
 
-async function loadArea() {
-  const res = await fetch('./area.geojson', { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Ne mogu učitati area.geojson (HTTP ${res.status})`);
-  const gj = await res.json();
+      if (areaLayer) areaLayer.remove();
 
-  if (areaLayer) areaLayer.remove();
-
-  areaLayer = L.geoJSON(gj, {
-    style: {
-      color: "#f97316",
-      weight: 2,
-      fillColor: "#f97316",
-      fillOpacity: 0.2
-    },
-    onEachFeature: (feature, layer) => {
-      const name =
-        feature.properties?.name ||
-        feature.properties?.NAME ||
-        feature.properties?.Naziv ||
-        "Područje";
-      layer.bindPopup(name);
-    },
-    pane: "overlayPane"
-  }).addTo(map);
-}
-
-async function loadTrack() {
-  setStatus("Učitavanje GeoJSON…");
-  const res = await fetch('./bird.geojson', { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
-
-  const gj = await res.json();
-  const features = Array.isArray(gj.features) ? gj.features : [];
-
-  // Clear old layers
-  if (pointsLayer) pointsLayer.remove();
-  if (trackLine) trackLine.remove();
-  if (movingMarker) movingMarker.remove();
-  stopAnim();
-
-  setStatus(`GeoJSON učitan • točaka: ${features.length}`);
-
-  if (features.length === 0) {
-    animLatLngs = [];
-    animTimes = [];
-    timelineEl.disabled = true;
-    resetBtn.disabled = true;
-    playBtn.disabled = true;
-    pauseBtn.disabled = true;
-    timelineLabelEl.textContent = "—";
-    return;
-  }
-
-  // Points
-  pointsLayer = L.geoJSON(gj, {
-    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-      radius: POINT_RADIUS,
-      color: POINT_STROKE,
-      weight: 1,
-      fillColor: POINT_FILL,
-      fillOpacity: 0.9
-    }),
-    onEachFeature: (feature, layer) => {
-      const p = feature.properties || {};
-      const html = `
-        <strong>Vrijeme (UTC):</strong> ${fmt(p.UTC_dateti)}<br/>
-        <strong>Uređaj:</strong> ${fmt(p.device_id)}<br/>
-        <strong>Brzina (km/h):</strong> ${fmt(p.speed_km_h)}<br/>
-        <strong>Visina (m):</strong> ${fmt(p.Altitude_m)}<br/>
-        <strong>Temp:</strong> ${fmt(p.temperatur)}
-      `;
-      layer.bindPopup(html);
+      areaLayer = L.geoJSON(gj, {
+        style: {
+          color: "#f97316",
+          weight: 2,
+          fillColor: "#f97316",
+          fillOpacity: 0.2
+        },
+        onEachFeature: (feature, layer) => {
+          const name =
+            (feature.properties && (feature.properties.name || feature.properties.NAME || feature.properties.Naziv)) ||
+            "Područje";
+          layer.bindPopup(name);
+        },
+        pane: "overlayPane"
+      }).addTo(map);
     }
-  }).addTo(map);
 
-  // Track line
-  const latlngs = features
-    .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
-    .filter(c => Array.isArray(c) && c.length >= 2)
-    .map(([lon, lat]) => [lat, lon]);
+    async function loadTrack() {
+      setStatus("Učitavanje GeoJSON…");
+      const res = await fetch('./bird.geojson', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
 
-  if (latlngs.length >= 2) {
-    trackLine = L.polyline(latlngs, {
-      color: TRACK_COLOR,
-      weight: TRACK_WEIGHT,
-      opacity: 0.9
-    }).addTo(map);
-  }
+      const gj = await res.json();
+      const features = Array.isArray(gj.features) ? gj.features : [];
 
-  const bounds = pointsLayer.getBounds();
-  if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
+      if (pointsLayer) pointsLayer.remove();
+      if (trackLine) trackLine.remove();
+      if (movingMarker) movingMarker.remove();
+      stopAnim();
 
-  animLatLngs = latlngs.slice();
-  animTimes = features.map(f => (f.properties || {}).UTC_dateti || "").slice(0, animLatLngs.length);
+      setStatus(`GeoJSON učitan • točaka: ${features.length}`);
 
-  if (animLatLngs.length > 0) {
-    movingMarker = L.circleMarker(animLatLngs[0], {
-      radius: MOVING_RADIUS,
-      color: MOVING_OUTLINE,
-      weight: 3,
-      fillColor: MOVING_FILL,
-      fillOpacity: 1
-    }).addTo(map);
+      if (features.length === 0) {
+        animLatLngs = [];
+        animTimes = [];
+        timelineEl.disabled = true;
+        resetBtn.disabled = true;
+        playBtn.disabled = true;
+        pauseBtn.disabled = true;
+        timelineLabelEl.textContent = "—";
+        return;
+      }
 
-    timelineEl.disabled = false;
-    timelineEl.min = "0";
-    timelineEl.max = String(animLatLngs.length - 1);
-    timelineEl.step = "1";
+      pointsLayer = L.geoJSON(gj, {
+        pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+          radius: POINT_RADIUS,
+          color: POINT_STROKE,
+          weight: 1,
+          fillColor: POINT_FILL,
+          fillOpacity: 0.9
+        }),
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties || {};
+          const html =
+            "<strong>Vrijeme (UTC):</strong> " + fmt(p.UTC_dateti) + "<br/>" +
+            "<strong>Uređaj:</strong> " + fmt(p.device_id) + "<br/>" +
+            "<strong>Brzina (km/h):</strong> " + fmt(p.speed_km_h) + "<br/>" +
+            "<strong>Visina (m):</strong> " + fmt(p.Altitude_m) + "<br/>" +
+            "<strong>Temp:</strong> " + fmt(p.temperatur);
+          layer.bindPopup(html);
+        }
+      }).addTo(map);
 
-    setIndex(0);
+      const latlngs = features
+        .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
+        .filter(c => Array.isArray(c) && c.length >= 2)
+        .map(c => [c[1], c[0]]);
 
-    resetBtn.disabled = false;
-    playBtn.disabled = false;
-    pauseBtn.disabled = true;
+      if (latlngs.length >= 2) {
+        trackLine = L.polyline(latlngs, {
+          color: TRACK_COLOR,
+          weight: TRACK_WEIGHT,
+          opacity: 0.9
+        }).addTo(map);
+      }
 
-    const lastProps = (features[features.length - 1] || {}).properties || {};
-    if (lastProps.UTC_dateti) {
-      setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
+      const bounds = pointsLayer.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
+
+      animLatLngs = latlngs.slice();
+      animTimes = features.map(f => (f.properties || {}).UTC_dateti || "").slice(0, animLatLngs.length);
+
+      if (animLatLngs.length > 0) {
+        movingMarker = L.circleMarker(animLatLngs[0], {
+          radius: MOVING_RADIUS,
+          color: MOVING_OUTLINE,
+          weight: 3,
+          fillColor: MOVING_FILL,
+          fillOpacity: 1
+        }).addTo(map);
+
+        timelineEl.disabled = false;
+        timelineEl.min = "0";
+        timelineEl.max = String(animLatLngs.length - 1);
+        timelineEl.step = "1";
+
+        setIndex(0);
+
+        resetBtn.disabled = false;
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+      }
     }
-  }
-}
 
-// Load layers
-loadArea().catch(err => console.error(err));
-loadTrack().catch(err => {
-  console.error(err);
-  setStatus(`Greška: ${err.message}`);
-});
+    // Controls
+    playBtn.addEventListener('click', startAnim);
+    pauseBtn.addEventListener('click', stopAnim);
+    resetBtn.addEventListener('click', resetAnim);
 
+    speedEl.addEventListener('input', () => {
+      if (animTimer) startAnim();
+    });
+
+    timelineEl.addEventListener('input', () => {
+      stopAnim();
+      setIndex(Number(timelineEl.value), { pan: true });
+    });
+
+    // Load layers
+    loadArea().catch(err => {
+      console.error(err);
+      setStatus(`Greška (area): ${err.message}`);
+    });
+
+    loadTrack().catch(err => {
+      console.error(err);
+      setStatus(`Greška (bird): ${err.message}`);
+    });
   </script>
 </body>
 </html>

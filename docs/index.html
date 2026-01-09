@@ -203,6 +203,34 @@
       pauseBtn.disabled = true;
     }
 
+    let areaLayer = null;
+
+async function loadArea() {
+  const res = await fetch('./area.geojson', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Ne mogu učitati area.geojson (HTTP ${res.status})`);
+  const gj = await res.json();
+
+  // Remove old layer if reloading
+  if (areaLayer) areaLayer.remove();
+
+  areaLayer = L.geoJSON(gj, {
+    style: {
+      color: "#f97316",
+      weight: 2,
+      fillColor: "#f97316",
+      fillOpacity: 0.2
+    },
+    onEachFeature: (feature, layer) => {
+      const name =
+        feature.properties?.name ||
+        feature.properties?.NAME ||
+        feature.properties?.Naziv ||
+        "Područje";
+      layer.bindPopup(name);
+    }
+  }).addTo(map);
+}
+
     async function loadTrack() {
       setStatus("Učitavanje GeoJSON…");
       const res = await fetch('./bird.geojson', { cache: 'no-store' });
@@ -315,6 +343,8 @@
       stopAnim();
       setIndex(Number(timelineEl.value), { pan:true });
     });
+
+    loadArea().catch(err => console.error(err));
 
     loadTrack().catch(err => {
       console.error(err);

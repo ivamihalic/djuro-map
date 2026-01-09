@@ -272,11 +272,13 @@
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           const html =
-            "<strong>Vrijeme (UTC):</strong> " + fmt(p.UTC_dateti) + "<br/>" +
+            "<strong>Vrijeme (UTC):</strong> " + fmt(p.UTC_dateti) + "<br/>"; 
+            /*
             "<strong>Uređaj:</strong> " + fmt(p.device_id) + "<br/>" +
             "<strong>Brzina (km/h):</strong> " + fmt(p.speed_km_h) + "<br/>" +
             "<strong>Visina (m):</strong> " + fmt(p.Altitude_m) + "<br/>" +
             "<strong>Temp:</strong> " + fmt(p.temperatur);
+            */
           layer.bindPopup(html);
         }
       }).addTo(map);

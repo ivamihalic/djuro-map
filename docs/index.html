@@ -238,13 +238,6 @@
       if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
 
       const gj = await res.json();
-      const features = Array.isArray(gj.features) ? gj.features : [];
-
-      features.sort((a, b) => {
-        const ta = new Date(a.properties.UTC_dateti);
-        const tb = new Date(b.properties.UTC_dateti);
-        return ta - tb;
-      });
 
       // Clear old layers
       if (pointsLayer) pointsLayer.remove();

@@ -214,23 +214,23 @@
     if (areaLayer) areaLayer.remove();
 
     areaLayer = L.geoJSON(gj, {
-      style: {
-        color: "#f97316",
-        weight: 2,
-        fillColor: "#f97316",
-        fillOpacity: 0.2
-      },
-      onEachFeature: (feature, layer) => {
-        const name =
-          feature.properties?.name ||
-          feature.properties?.NAME ||
-          feature.properties?.Naziv ||
-          "Područje";
-        layer.bindPopup(name);
-      }
-      pane: "overlayPane"  
-    }).addTo(map);
-  }
+  style: {
+    color: "#f97316",
+    weight: 2,
+    fillColor: "#f97316",
+    fillOpacity: 0.2
+  },
+  onEachFeature: (feature, layer) => {
+    const name =
+      feature.properties?.name ||
+      feature.properties?.NAME ||
+      feature.properties?.Naziv ||
+      "Područje";
+    layer.bindPopup(name);
+  },
+  pane: "overlayPane"
+}).addTo(map);
+
 
     async function loadTrack() {
       setStatus("Učitavanje GeoJSON…");
@@ -238,6 +238,7 @@
       if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
 
       const gj = await res.json();
+      const features = Array.isArray(gj.features) ? gj.features : [];
 
       // Clear old layers
       if (pointsLayer) pointsLayer.remove();

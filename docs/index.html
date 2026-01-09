@@ -205,152 +205,137 @@
 
     let areaLayer = null;
 
-  async function loadArea() {
-    const res = await fetch('./area.geojson', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`Ne mogu učitati area.geojson (HTTP ${res.status})`);
-    const gj = await res.json();
+  let areaLayer = null;
 
-    // Remove old layer if reloading
-    if (areaLayer) areaLayer.remove();
+async function loadArea() {
+  const res = await fetch('./area.geojson', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Ne mogu učitati area.geojson (HTTP ${res.status})`);
+  const gj = await res.json();
 
-    areaLayer = L.geoJSON(gj, {
-  style: {
-    color: "#f97316",
-    weight: 2,
-    fillColor: "#f97316",
-    fillOpacity: 0.2
-  },
-  onEachFeature: (feature, layer) => {
-    const name =
-      feature.properties?.name ||
-      feature.properties?.NAME ||
-      feature.properties?.Naziv ||
-      "Područje";
-    layer.bindPopup(name);
-  },
-  pane: "overlayPane"
-}).addTo(map);
+  if (areaLayer) areaLayer.remove();
 
+  areaLayer = L.geoJSON(gj, {
+    style: {
+      color: "#f97316",
+      weight: 2,
+      fillColor: "#f97316",
+      fillOpacity: 0.2
+    },
+    onEachFeature: (feature, layer) => {
+      const name =
+        feature.properties?.name ||
+        feature.properties?.NAME ||
+        feature.properties?.Naziv ||
+        "Područje";
+      layer.bindPopup(name);
+    },
+    pane: "overlayPane"
+  }).addTo(map);
+}
 
-    async function loadTrack() {
-      setStatus("Učitavanje GeoJSON…");
-      const res = await fetch('./bird.geojson', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
+async function loadTrack() {
+  setStatus("Učitavanje GeoJSON…");
+  const res = await fetch('./bird.geojson', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Ne mogu učitati bird.geojson (HTTP ${res.status})`);
 
-      const gj = await res.json();
-      const features = Array.isArray(gj.features) ? gj.features : [];
+  const gj = await res.json();
+  const features = Array.isArray(gj.features) ? gj.features : [];
 
-      // Clear old layers
-      if (pointsLayer) pointsLayer.remove();
-      if (trackLine) trackLine.remove();
-      if (movingMarker) movingMarker.remove();
-      stopAnim();
+  // Clear old layers
+  if (pointsLayer) pointsLayer.remove();
+  if (trackLine) trackLine.remove();
+  if (movingMarker) movingMarker.remove();
+  stopAnim();
 
-      setStatus(`GeoJSON učitan • točaka: ${features.length}`);
+  setStatus(`GeoJSON učitan • točaka: ${features.length}`);
 
-      if (features.length === 0) {
-        animLatLngs = [];
-        animTimes = [];
-        timelineEl.disabled = true;
-        resetBtn.disabled = true;
-        playBtn.disabled = true;
-        pauseBtn.disabled = true;
-        timelineLabelEl.textContent = "—";
-        return;
-      }
+  if (features.length === 0) {
+    animLatLngs = [];
+    animTimes = [];
+    timelineEl.disabled = true;
+    resetBtn.disabled = true;
+    playBtn.disabled = true;
+    pauseBtn.disabled = true;
+    timelineLabelEl.textContent = "—";
+    return;
+  }
 
-      // Points
-      pointsLayer = L.geoJSON(gj, {
-        pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
-          radius: POINT_RADIUS,
-          color: POINT_STROKE,
-          weight: 1,
-          fillColor: POINT_FILL,
-          fillOpacity: 0.9
-        }),
-        onEachFeature: (feature, layer) => {
-          const p = feature.properties || {};
-          const html = `
-            <strong>Vrijeme (UTC):</strong> ${fmt(p.UTC_dateti)}<br/>
-            <strong>Uređaj:</strong> ${fmt(p.device_id)}<br/>
-            <strong>Brzina (km/h):</strong> ${fmt(p.speed_km_h)}<br/>
-            <strong>Visina (m):</strong> ${fmt(p.Altitude_m)}<br/>
-            <strong>Temp:</strong> ${fmt(p.temperatur)}
-          `;
-          layer.bindPopup(html);
-        }
-      }).addTo(map);
-
-      // Build track latlngs from Point coordinates
-      const latlngs = features
-        .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
-        .filter(c => Array.isArray(c) && c.length >= 2)
-        .map(([lon, lat]) => [lat, lon]);
-
-      // Plain track line (single color)
-      if (latlngs.length >= 2) {
-        trackLine = L.polyline(latlngs, {
-          color: TRACK_COLOR,
-          weight: TRACK_WEIGHT,
-          opacity: 0.9
-        }).addTo(map);
-      }
-
-      // Fit
-      const bounds = pointsLayer.getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
-
-      // Animation arrays
-      animLatLngs = latlngs.slice();
-      animTimes = features.map(f => (f.properties || {}).UTC_dateti || "").slice(0, animLatLngs.length);
-
-      // Moving marker
-      if (animLatLngs.length > 0) {
-        movingMarker = L.circleMarker(animLatLngs[0], {
-          radius: MOVING_RADIUS,
-          color: MOVING_OUTLINE,
-          weight: 3,
-          fillColor: MOVING_FILL,
-          fillOpacity: 1
-        }).addTo(map);
-
-        timelineEl.disabled = false;
-        timelineEl.min = "0";
-        timelineEl.max = String(animLatLngs.length - 1);
-        timelineEl.step = "1";
-
-        setIndex(0);
-
-        resetBtn.disabled = false;
-        playBtn.disabled = false;
-        pauseBtn.disabled = true;
-
-        const lastProps = (features[features.length - 1] || {}).properties || {};
-        if (lastProps.UTC_dateti) {
-          setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
-        }
-      }
+  // Points
+  pointsLayer = L.geoJSON(gj, {
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+      radius: POINT_RADIUS,
+      color: POINT_STROKE,
+      weight: 1,
+      fillColor: POINT_FILL,
+      fillOpacity: 0.9
+    }),
+    onEachFeature: (feature, layer) => {
+      const p = feature.properties || {};
+      const html = `
+        <strong>Vrijeme (UTC):</strong> ${fmt(p.UTC_dateti)}<br/>
+        <strong>Uređaj:</strong> ${fmt(p.device_id)}<br/>
+        <strong>Brzina (km/h):</strong> ${fmt(p.speed_km_h)}<br/>
+        <strong>Visina (m):</strong> ${fmt(p.Altitude_m)}<br/>
+        <strong>Temp:</strong> ${fmt(p.temperatur)}
+      `;
+      layer.bindPopup(html);
     }
+  }).addTo(map);
 
-    playBtn.addEventListener('click', startAnim);
-    pauseBtn.addEventListener('click', stopAnim);
-    resetBtn.addEventListener('click', resetAnim);
+  // Track line
+  const latlngs = features
+    .map(f => (f && f.geometry && f.geometry.type === "Point") ? f.geometry.coordinates : null)
+    .filter(c => Array.isArray(c) && c.length >= 2)
+    .map(([lon, lat]) => [lat, lon]);
 
-    speedEl.addEventListener('input', () => {
-      if (animTimer) startAnim();
-    });
+  if (latlngs.length >= 2) {
+    trackLine = L.polyline(latlngs, {
+      color: TRACK_COLOR,
+      weight: TRACK_WEIGHT,
+      opacity: 0.9
+    }).addTo(map);
+  }
 
-    timelineEl.addEventListener('input', () => {
-      stopAnim();
-      setIndex(Number(timelineEl.value), { pan:true });
-    });
+  const bounds = pointsLayer.getBounds();
+  if (bounds.isValid()) map.fitBounds(bounds.pad(0.15));
 
-    loadArea().catch(err => console.error(err));
+  animLatLngs = latlngs.slice();
+  animTimes = features.map(f => (f.properties || {}).UTC_dateti || "").slice(0, animLatLngs.length);
 
-    loadTrack().catch(err => {
-      console.error(err);
-      setStatus(`Greška: ${err.message}`);
-    });
+  if (animLatLngs.length > 0) {
+    movingMarker = L.circleMarker(animLatLngs[0], {
+      radius: MOVING_RADIUS,
+      color: MOVING_OUTLINE,
+      weight: 3,
+      fillColor: MOVING_FILL,
+      fillOpacity: 1
+    }).addTo(map);
+
+    timelineEl.disabled = false;
+    timelineEl.min = "0";
+    timelineEl.max = String(animLatLngs.length - 1);
+    timelineEl.step = "1";
+
+    setIndex(0);
+
+    resetBtn.disabled = false;
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+
+    const lastProps = (features[features.length - 1] || {}).properties || {};
+    if (lastProps.UTC_dateti) {
+      setStatus(`GeoJSON učitan • točaka: ${features.length} • zadnje prikazano: ${lastProps.UTC_dateti} (UTC)`);
+    }
+  }
+}
+
+// Load layers
+loadArea().catch(err => console.error(err));
+loadTrack().catch(err => {
+  console.error(err);
+  setStatus(`Greška: ${err.message}`);
+});
+
   </script>
 </body>
 </html>

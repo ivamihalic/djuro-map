@@ -205,8 +205,6 @@
 
     let areaLayer = null;
 
-  let areaLayer = null;
-
 async function loadArea() {
   const res = await fetch('./area.geojson', { cache: 'no-store' });
   if (!res.ok) throw new Error(`Ne mogu učitati area.geojson (HTTP ${res.status})`);
